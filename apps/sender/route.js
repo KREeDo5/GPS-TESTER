@@ -61,6 +61,19 @@ function densify(points, targetStepMeters = 12, maxPoints = 6000) {
   return result;
 }
 
+function nearestGeometryIndex(geometry, point, fromIndex) {
+  let bestIndex = fromIndex;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = fromIndex; index < geometry.length; index += 1) {
+    const distance = haversineMeters(geometry[index], point);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
 async function fetchOsrm(waypoints) {
   const coordinates = waypoints.map((point) => `${point.lon},${point.lat}`).join(';');
   const url = new URL(`https://router.project-osrm.org/route/v1/driving/${coordinates}`);
@@ -98,15 +111,34 @@ async function fetchOsrm(waypoints) {
       })
     : waypoints.map((point) => ({ lat: point.lat, lon: point.lon }));
 
-  const legs = route.legs.map((leg, index) => {
-    const coordinatesRaw = leg?.geometry?.coordinates;
-    const geometry = Array.isArray(coordinatesRaw)
-      ? coordinatesRaw
-          .filter((item) => Array.isArray(item) && item.length >= 2)
-          .map((item) => ({ lat: Number(item[1]), lon: Number(item[0]) }))
-      : [];
+  // OSRM возвращает геометрию только на уровне всего маршрута, а не на каждом leg.
+  // Режем её по ближайшим точкам к привязанным waypoint'ам.
+  const coordinatesRaw = route?.geometry?.coordinates;
+  const routeGeometry = Array.isArray(coordinatesRaw)
+    ? coordinatesRaw
+        .filter((item) => Array.isArray(item) && item.length >= 2)
+        .map((item) => ({ lat: Number(item[1]), lon: Number(item[0]) }))
+    : [];
+  if (routeGeometry.length < 2) {
+    throw new RouteError('OSRM не вернул геометрию маршрута', 502);
+  }
+
+  const splitIndices = [];
+  let searchFrom = 0;
+  for (const point of snapped) {
+    const index = nearestGeometryIndex(routeGeometry, point, searchFrom);
+    splitIndices.push(index);
+    searchFrom = index;
+  }
+  splitIndices[0] = 0;
+  splitIndices[splitIndices.length - 1] = routeGeometry.length - 1;
+
+  const legs = route.legs.map((_leg, index) => {
+    const fromIndex = splitIndices[index];
+    const toIndex = splitIndices[index + 1];
+    let geometry = routeGeometry.slice(fromIndex, Math.max(fromIndex + 1, toIndex + 1));
     if (geometry.length < 2) {
-      geometry.push(snapped[index], snapped[index + 1]);
+      geometry = [snapped[index], snapped[index + 1]];
     } else {
       geometry[0] = snapped[index];
       geometry[geometry.length - 1] = snapped[index + 1];
