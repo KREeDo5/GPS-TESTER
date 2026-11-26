@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GPS Receiver — приём и история позиций</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <div>
+          <strong>GPS Receiver</strong>
+          <span class="brand-sub">порт 4000 · история и карта</span>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <span id="connection" class="connection is-offline" title="SSE-соединение">
+          <span class="connection-dot"></span>
+          <span id="connectionText">нет связи</span>
+        </span>
+
+        <label class="field inline">
+          <span>Заказ</span>
+          <select id="orderSelect"></select>
+        </label>
+
+        <label class="field inline">
+          <span>Устройство</span>
+          <select id="deviceSelect"></select>
+        </label>
+
+        <label class="check" title="Автоматически центрировать карту на новой точке">
+          <input id="followToggle" type="checkbox" checked />
+          <span>Следить</span>
+        </label>
+
+        <div class="toolbar">
+          <button id="refreshButton" class="button ghost" type="button" title="Перезагрузить историю">
+            Обновить
+          </button>
+          <a id="exportGeoJson" class="button ghost" href="/api/export.geojson" download>
+            GeoJSON
+          </a>
+          <a id="exportCsv" class="button ghost" href="/api/export.csv" download>
+            CSV
+          </a>
+          <button id="clearButton" class="button danger" type="button">Очистить</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="panel stats-panel">
+          <div class="panel-head">
+            <h2>Сводка</h2>
+            <span id="lastSeen" class="muted">нет данных</span>
+          </div>
+          <div class="stats-grid">
+            <div class="stat">
+              <span class="stat-label">Точек</span>
+              <strong id="statPoints">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Дистанция</span>
+              <strong id="statDistance">0 м</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Средняя</span>
+              <strong id="statSpeed">0 км/ч</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">В пути</span>
+              <strong id="statDuration">0:00</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Макс. разрыв</span>
+              <strong id="statGap">—</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Устройства</span>
+              <strong id="statDevices">—</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel replay-panel">
+          <div class="panel-head">
+            <h2>Проигрывание маршрута</h2>
+            <span id="replayCounter" class="muted">0 / 0</span>
+          </div>
+          <input id="replayRange" class="range" type="range" min="0" max="0" value="0" step="1" />
+          <div class="replay-controls">
+            <button id="replayPlay" class="button primary" type="button">▶</button>
+            <select id="replaySpeed" class="select compact" title="Скорость проигрывания">
+              <option value="0.5">×0.5</option>
+              <option value="1" selected>×1</option>
+              <option value="2">×2</option>
+              <option value="4">×4</option>
+            </select>
+            <span id="replayInfo" class="muted replay-info">—</span>
+          </div>
+        </section>
+
+        <section class="panel history-panel">
+          <div class="panel-head sticky-head">
+            <h2>История обновлений</h2>
+            <span id="historyCount" class="muted">0</span>
+          </div>
+          <div id="historyEmpty" class="empty">
+            Пока нет точек. Запустите мобильное приложение с включённым GPS-трекингом.
+          </div>
+          <ol id="historyList" class="history-list"></ol>
+        </section>
+      </aside>
+
+      <section class="map-section">
+        <div id="map" class="map"></div>
+        <div class="map-legend">
+          <span><i class="line stop"></i>стоянка</span>
+          <span><i class="line slow"></i>&lt; 12</span>
+          <span><i class="line normal"></i>12–35</span>
+          <span><i class="line fast"></i>35–70</span>
+          <span><i class="line veryFast"></i>&gt; 70 км/ч</span>
+          <span><i class="line gap"></i>разрыв</span>
+        </div>
+        <div id="mapEmpty" class="map-empty">
+          <div class="map-empty-card">
+            <strong>Ожидание данных</strong>
+            <span>POST /api/orders/&lt;id&gt;/courier-position</span>
+            <span>{ "lat": 55.7558, "lon": 37.6173 }</span>
+          </div>
+        </div>
+        <div class="map-meta">
+          <span id="mapMeta">—</span>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="pointDialog" class="dialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-head">
+          <h3>Точка маршрута</h3>
+          <button class="button ghost" value="close" type="submit">Закрыть</button>
+        </div>
+        <div id="pointDialogBody" class="dialog-body"></div>
+      </form>
+    </dialog>
+
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=__YANDEX_MAPS_API_KEY__&lang=ru_RU"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

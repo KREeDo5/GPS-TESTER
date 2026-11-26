@@ -1,0 +1,19 @@
+{
+  "name": "gps-tester",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GPS debugging environment: emulator route simulator + mobile position receiver with live map",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node scripts/start-all.js",
+    "dev": "node scripts/start-all.js",
+    "sender": "node apps/sender/server.js",
+    "receiver": "node apps/receiver/server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

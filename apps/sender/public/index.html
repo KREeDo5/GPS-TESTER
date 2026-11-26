@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GPS Route Simulator — управление геолокацией эмуляторов</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">⌖</span>
+        <div>
+          <strong>GPS Route Simulator</strong>
+          <span class="brand-sub">порт 3000 · эмуляторы и маршрут</span>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <a class="button ghost" href="http://localhost:4000" target="_blank" rel="noreferrer">
+          Открыть приёмник ↗
+        </a>
+        <span id="simBadge" class="status-badge is-idle">ожидание</span>
+        <button id="refreshDevices" class="button ghost" type="button">Обновить устройства</button>
+        <span id="deviceCount" class="muted">0 устройств</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Устройства</h2>
+            <span id="deviceHint" class="muted">—</span>
+          </div>
+          <div id="deviceList" class="device-list"></div>
+          <div id="deviceErrors" class="inline-error hidden"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Маршрут</h2>
+            <span id="waypointCount" class="muted">0 точек</span>
+          </div>
+
+          <div class="segmented" role="group" aria-label="Режим построения маршрута">
+            <label>
+              <input type="radio" name="routeMode" value="osrm" checked />
+              <span>По дорогам</span>
+            </label>
+            <label>
+              <input type="radio" name="routeMode" value="straight" />
+              <span>По прямой</span>
+            </label>
+          </div>
+
+          <p class="hint">Кликните по карте, чтобы добавить точку. Маркеры можно перетаскивать.</p>
+
+          <div class="button-row">
+            <button id="buildRoute" class="button primary" type="button" disabled>
+              Построить маршрут
+            </button>
+            <button id="clearRoute" class="button ghost" type="button">Очистить</button>
+          </div>
+
+          <div id="routeSummary" class="route-summary hidden"></div>
+        </section>
+
+        <section class="panel waypoints-panel">
+          <div class="panel-head">
+            <h2>Точки и скорости</h2>
+            <span class="muted">скорость до следующей</span>
+          </div>
+          <div id="waypointList" class="waypoint-list">
+            <div class="empty">Добавьте минимум две точки на карте.</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Симуляция</h2>
+            <span id="simClock" class="muted">0:00 / 0:00</span>
+          </div>
+
+          <label class="field">
+            <span>Обновление GPS</span>
+            <select id="tickSelect" class="select">
+              <option value="500">0.5 с</option>
+              <option value="1000" selected>1 с</option>
+              <option value="2000">2 с</option>
+              <option value="5000">5 с</option>
+            </select>
+          </label>
+
+          <div class="button-row simulation-buttons">
+            <button id="startSimulation" class="button primary" type="button" disabled>Старт</button>
+            <button id="pauseSimulation" class="button ghost" type="button" disabled>Пауза</button>
+            <button id="resumeSimulation" class="button ghost" type="button" disabled>Продолжить</button>
+            <button id="stopSimulation" class="button danger" type="button" disabled>Стоп</button>
+          </div>
+
+          <div class="progress">
+            <div id="progressBar" class="progress-bar"></div>
+          </div>
+
+          <dl class="live-grid">
+            <div>
+              <dt>Текущая точка</dt>
+              <dd id="livePosition">—</dd>
+            </div>
+            <div>
+              <dt>Скорость</dt>
+              <dd id="liveSpeed">—</dd>
+            </div>
+            <div>
+              <dt>Пройдено</dt>
+              <dd id="liveDistance">—</dd>
+            </div>
+            <div>
+              <dt>Участок</dt>
+              <dd id="liveLeg">—</dd>
+            </div>
+          </dl>
+
+          <div id="simErrors" class="inline-error hidden"></div>
+
+          <details class="preview-details">
+            <summary>Дублировать точки в приёмник</summary>
+            <p class="hint">
+              Позволяет проверить dashboard без мобильного приложения. Для end-to-end теста
+              выключите: точки должен отправлять foreground service.
+            </p>
+            <label class="switch-row">
+              <input id="previewEnabled" type="checkbox" />
+              <span>Отправлять с сервера симулятора</span>
+            </label>
+            <label class="field">
+              <span>URL приёмника</span>
+              <input id="previewUrl" type="url" value="http://127.0.0.1:4000/api" />
+            </label>
+            <label class="field">
+              <span>Номер заказа</span>
+              <input id="previewOrder" type="text" value="900001" />
+            </label>
+            <label class="field">
+              <span>Токен</span>
+              <input id="previewToken" type="text" value="dev-token" />
+            </label>
+            <div id="previewStatus" class="muted preview-status">—</div>
+          </details>
+        </section>
+      </aside>
+
+      <section class="map-section">
+        <div id="map" class="map"></div>
+        <div class="map-hint">Клик по карте — новая точка</div>
+        <div class="map-legend">
+          <span><i class="line planned"></i>маршрут</span>
+          <span><i class="dot current"></i>курьер</span>
+          <span><i class="line traveled"></i>пройдено</span>
+        </div>
+        <div id="mapMeta" class="map-meta">—</div>
+      </section>
+    </main>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=__YANDEX_MAPS_API_KEY__&lang=ru_RU"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
