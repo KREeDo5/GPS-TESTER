@@ -58,6 +58,7 @@
   };
 
   let map = null;
+  let authError = false;
   let routeLayer = null;
   let pointsLayer = null;
   let replayLayer = null;
@@ -124,10 +125,15 @@
 
   async function fetchJson(url, options) {
     const response = await fetch(url, options);
+    if (response.status === 401) {
+      authError = true;
+      throw new Error('нужен токен: откройте /?token=<RECEIVER_TOKEN>');
+    }
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`${response.status}: ${text.slice(0, 200)}`);
     }
+    authError = false;
     return response.json();
   }
 
@@ -436,12 +442,23 @@
         <div><dt>От предыдущей</dt><dd>${formatDistance(Number(point.distance_m) || 0)} · ${formatNumber(Number(point.dt_s) || 0, 1)} с</dd></div>
         <div><dt>Устройство</dt><dd>${escapeHtml(point.device_label || 'без метки')}</dd></div>
         <div><dt>Источник</dt><dd>${escapeHtml(point.source || 'mobile')}</dd></div>
-        <div><dt>Токен</dt><dd>…${escapeHtml(point.token_tail || '—')}</dd></div>
-        <div><dt>IP</dt><dd>${escapeHtml(point.ip || '—')}</dd></div>
-        <div><dt>User-Agent</dt><dd>${escapeHtml(point.user_agent || '—')}</dd></div>
         <div><dt>Дубль</dt><dd>${point.duplicate ? 'да' : 'нет'}</dd></div>
+        ${
+          point.ip !== undefined
+            ? `<div><dt>IP</dt><dd>${escapeHtml(point.ip || '—')}</dd></div>`
+            : ''
+        }
+        ${
+          point.user_agent !== undefined
+            ? `<div><dt>User-Agent</dt><dd>${escapeHtml(point.user_agent || '—')}</dd></div>`
+            : ''
+        }
       </dl>
-      <pre class="raw">${escapeHtml(JSON.stringify(point.raw ?? {}, null, 2))}</pre>
+      ${
+        point.raw !== undefined
+          ? `<pre class="raw">${escapeHtml(JSON.stringify(point.raw ?? {}, null, 2))}</pre>`
+          : ''
+      }
     `;
     els.pointDialog.showModal();
   }
@@ -786,7 +803,8 @@
     eventSource = new EventSource('/api/events');
 
     eventSource.onopen = () => setConnection('live', 'в эфире');
-    eventSource.onerror = () => setConnection('retry', 'переподключение…');
+    eventSource.onerror = () =>
+      setConnection('retry', authError ? 'нужен токен' : 'переподключение…');
 
     eventSource.addEventListener('hello', () => setConnection('live', 'в эфире'));
 
@@ -887,7 +905,7 @@
       await loadAll();
     } catch (error) {
       console.error(error);
-      setConnection('retry', 'ошибка загрузки');
+      setConnection('retry', authError ? 'нужен токен' : 'ошибка загрузки');
     } finally {
       els.refreshButton.disabled = false;
       els.refreshButton.textContent = original;
@@ -932,7 +950,7 @@
       .then(() => setConnection('live', 'в эфире'))
       .catch((error) => {
         console.error(error);
-        setConnection('retry', 'нет данных');
+        setConnection('retry', authError ? 'нужен токен' : 'нет данных');
       });
   });
 })();

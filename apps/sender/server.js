@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { injectMapsApiKey, loadEnvFile } from '../../lib/config.js';
+import { createTokenAuth, isLoopbackHost, normalizeHost } from '../../lib/auth.js';
 import { haversineMeters } from '../../lib/geo.js';
 import { adbPath, listDevices, setDeviceLocation } from '../../lib/devices.js';
 import { buildRoute, positionAt, publicRoute, RouteError } from './route.js';
@@ -15,8 +16,29 @@ const root = path.resolve(__dirname, '../..');
 loadEnvFile(path.join(root, '.env'));
 
 const PORT = Number(process.env.SENDER_PORT || process.env.PORT || 3000);
-const HOST = process.env.SENDER_HOST || '0.0.0.0';
+const HOST = process.env.SENDER_HOST || '127.0.0.1';
 const YANDEX_MAPS_API_KEY = process.env.YANDEX_MAPS_API_KEY || '';
+const SENDER_TOKEN = process.env.SENDER_TOKEN || '';
+const PREVIEW_ALLOWED_HOSTS = new Set(
+  String(process.env.PREVIEW_ALLOWED_HOSTS || '127.0.0.1,localhost,::1,10.0.2.2')
+    .split(',')
+    .map((host) => normalizeHost(host))
+    .filter(Boolean),
+);
+
+if (!isLoopbackHost(HOST) && !SENDER_TOKEN) {
+  console.error(
+    `[sender] SENDER_HOST=${HOST}, но SENDER_TOKEN не задан: API управления эмуляторами был бы доступен всем в сети.`,
+  );
+  console.error('[sender] Задайте SENDER_TOKEN в .env или вернитесь на 127.0.0.1.');
+  process.exit(1);
+}
+
+const auth = createTokenAuth({
+  token: SENDER_TOKEN,
+  cookieName: 'gps_sender_session',
+  label: 'Sender',
+});
 
 const DEFAULT_PREVIEW = {
   enabled: false,
@@ -271,6 +293,12 @@ function sanitizePreview(input) {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new RouteError('URL приёмника должен начинаться с http:// или https://');
   }
+  const host = normalizeHost(parsed.hostname);
+  if (!PREVIEW_ALLOWED_HOSTS.has(host)) {
+    throw new RouteError(
+      `Хост ${host} не разрешён для preview. Добавьте его в PREVIEW_ALLOWED_HOSTS.`,
+    );
+  }
   return { enabled, baseUrl, orderId, token };
 }
 
@@ -298,16 +326,9 @@ function asyncHandler(handler) {
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
+
+// Токен (Bearer) или HttpOnly-сессия UI обязательны для всех API.
+app.use('/api', auth.middleware);
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -481,7 +502,8 @@ app.get(
   }),
 );
 
-app.get(['/', '/index.html'], (_req, res) => {
+app.get(['/', '/index.html'], (req, res) => {
+  if (auth.handleTokenQuery(req, res)) return;
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   res.type('html').send(injectMapsApiKey(html, YANDEX_MAPS_API_KEY));
 });
@@ -508,6 +530,13 @@ app.use((error, _req, res, _next) => {
 app.listen(PORT, HOST, () => {
   console.log(`[sender] http://localhost:${PORT}`);
   console.log(`[sender] adb: ${adbPath}`);
+  console.log(`[sender] auth: ${SENDER_TOKEN ? 'Bearer + UI session' : 'off (loopback only)'}`);
+  if (SENDER_TOKEN) {
+    console.log(
+      `[sender] UI: откройте http://localhost:${PORT}/?token=<SENDER_TOKEN> один раз для входа`,
+    );
+  }
+  console.log(`[sender] preview hosts: ${[...PREVIEW_ALLOWED_HOSTS].join(', ')}`);
   if (!YANDEX_MAPS_API_KEY) {
     console.warn('[sender] YANDEX_MAPS_API_KEY не задан: карта не загрузится. Укажите ключ в .env');
   }

@@ -70,6 +70,14 @@
   const savedWaypoints = readJson(STORAGE.waypoints, null);
   const savedSelection = readJson(STORAGE.devices, null);
   const savedPreview = readJson(STORAGE.preview, {}) || {};
+  // Токен приёмника не храним в localStorage: только в памяти вкладки.
+  if (savedPreview && typeof savedPreview === 'object' && 'token' in savedPreview) {
+    writeJson(STORAGE.preview, {
+      enabled: Boolean(savedPreview.enabled),
+      baseUrl: String(savedPreview.baseUrl || DEFAULT_PREVIEW.baseUrl),
+      orderId: String(savedPreview.orderId || DEFAULT_PREVIEW.orderId),
+    });
+  }
   const savedTick = Number(localStorage.getItem(STORAGE.tick) || 1000);
 
   const state = {
@@ -96,7 +104,7 @@
       enabled: Boolean(savedPreview.enabled),
       baseUrl: String(savedPreview.baseUrl || DEFAULT_PREVIEW.baseUrl),
       orderId: String(savedPreview.orderId || DEFAULT_PREVIEW.orderId),
-      token: String(savedPreview.token || DEFAULT_PREVIEW.token),
+      token: String(DEFAULT_PREVIEW.token),
     },
     tickMs: [500, 1000, 2000, 5000].includes(savedTick) ? savedTick : 1000,
     devicesSignature: '',
@@ -618,7 +626,12 @@
   }
 
   function persistPreview() {
-    writeJson(STORAGE.preview, state.preview);
+    // Токен не персистим: держим его только в памяти вкладки.
+    writeJson(STORAGE.preview, {
+      enabled: state.preview.enabled,
+      baseUrl: state.preview.baseUrl,
+      orderId: state.preview.orderId,
+    });
   }
 
   function persistMode() {

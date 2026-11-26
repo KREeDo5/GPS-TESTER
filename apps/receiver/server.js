@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { haversineMeters } from '../../lib/geo.js';
 import { injectMapsApiKey, loadEnvFile } from '../../lib/config.js';
+import { createTokenAuth, isLoopbackHost } from '../../lib/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,13 +15,31 @@ const root = path.resolve(__dirname, '../..');
 loadEnvFile(path.join(root, '.env'));
 
 const PORT = Number(process.env.RECEIVER_PORT || process.env.PORT || 4000);
-const HOST = process.env.RECEIVER_HOST || '0.0.0.0';
+const HOST = process.env.RECEIVER_HOST || '127.0.0.1';
 const DATA_DIR = process.env.DATA_DIR || path.join(root, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'positions.jsonl');
 const REQUIRED_TOKEN = process.env.RECEIVER_TOKEN || '';
 const YANDEX_MAPS_API_KEY = process.env.YANDEX_MAPS_API_KEY || '';
+const STORE_DEBUG_META = process.env.STORE_DEBUG_META === '1';
+const RETENTION_DAYS_RAW = Number(process.env.POSITIONS_RETENTION_DAYS ?? '30');
+const RETENTION_DAYS =
+  Number.isFinite(RETENTION_DAYS_RAW) && RETENTION_DAYS_RAW >= 0 ? RETENTION_DAYS_RAW : 30;
 const DEFAULT_LIMIT = 20000;
 const MAX_LIMIT = 50000;
+
+if (!isLoopbackHost(HOST) && !REQUIRED_TOKEN) {
+  console.error(
+    `[receiver] RECEIVER_HOST=${HOST}, но RECEIVER_TOKEN не задан: история была бы доступна всем в сети.`,
+  );
+  console.error('[receiver] Задайте RECEIVER_TOKEN в .env или вернитесь на 127.0.0.1.');
+  process.exit(1);
+}
+
+const auth = createTokenAuth({
+  token: REQUIRED_TOKEN,
+  cookieName: 'gps_receiver_session',
+  label: 'Receiver',
+});
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -30,6 +49,7 @@ const positions = [];
 const lastByOrder = new Map();
 /** @type {Set<import('express').Response>} */
 const sseClients = new Set();
+let dataNeedsRewrite = false;
 
 function loadPositions() {
   if (!fs.existsSync(DATA_FILE)) return;
@@ -42,6 +62,20 @@ function loadPositions() {
         continue;
       }
       point.order_id = String(point.order_id ?? '');
+      // Фрагмент токена не должен храниться и отдаваться никогда.
+      if (Object.prototype.hasOwnProperty.call(point, 'token_tail')) {
+        delete point.token_tail;
+        dataNeedsRewrite = true;
+      }
+      // IP, User-Agent и тело запроса — только по явному включению.
+      if (!STORE_DEBUG_META) {
+        for (const field of ['ip', 'user_agent', 'raw']) {
+          if (Object.prototype.hasOwnProperty.call(point, field)) {
+            delete point[field];
+            dataNeedsRewrite = true;
+          }
+        }
+      }
       positions.push(point);
     } catch {
       // Skip corrupt line, keep the rest of the history usable.
@@ -51,6 +85,20 @@ function loadPositions() {
   for (const point of positions) {
     lastByOrder.set(String(point.order_id), point);
   }
+}
+
+function pruneOldPositions() {
+  if (!(RETENTION_DAYS > 0)) return false;
+  const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  let removed = false;
+  for (let index = positions.length - 1; index >= 0; index -= 1) {
+    const receivedAt = Date.parse(positions[index].received_at);
+    if (Number.isFinite(receivedAt) && receivedAt < cutoff) {
+      positions.splice(index, 1);
+      removed = true;
+    }
+  }
+  return removed;
 }
 
 function persistPoint(point) {
@@ -83,13 +131,6 @@ function broadcast(payload) {
       sseClients.delete(client);
     }
   }
-}
-
-function tokenTail(header) {
-  const value = typeof header === 'string' ? header : '';
-  const match = /^Bearer\s+(.+)$/i.exec(value);
-  const token = match ? match[1] : value;
-  return token ? token.slice(-6) : null;
 }
 
 function normalizeCoordinate(value) {
@@ -157,15 +198,17 @@ function recordPoint(req, orderId, lat, lon, source) {
       (typeof req.get('x-source') === 'string' && req.get('x-source').trim()) ||
       (typeof source.source === 'string' && source.source.trim()) ||
       'mobile',
-    token_tail: tokenTail(req.get('authorization')),
-    ip: req.ip,
-    user_agent: req.get('user-agent') || '',
     duplicate,
     distance_m: Math.round(distanceM * 100) / 100,
     dt_s: Math.round(dtS * 100) / 100,
     speed_kmh: Math.round(speedKmh * 10) / 10,
-    raw: source,
   };
+
+  if (STORE_DEBUG_META) {
+    point.ip = req.ip;
+    point.user_agent = req.get('user-agent') || '';
+    point.raw = source;
+  }
 
   positions.push(point);
   lastByOrder.set(key, point);
@@ -232,15 +275,6 @@ function invalidResponse(res, message) {
 }
 
 function handleCourierPosition(req, res) {
-  if (REQUIRED_TOKEN) {
-    const header = req.get('authorization') || '';
-    const token = /^Bearer\s+(.+)$/i.exec(header)?.[1] || '';
-    if (token !== REQUIRED_TOKEN) {
-      res.status(401).json({ data: null, meta: { success: false, error: 'Unauthorized' } });
-      return;
-    }
-  }
-
   const parsed = parsePoint(req.body, req.params.orderId);
   if (parsed.error) {
     invalidResponse(res, parsed.error);
@@ -256,25 +290,19 @@ function handleCourierPosition(req, res) {
 }
 
 loadPositions();
+if (pruneOldPositions()) dataNeedsRewrite = true;
+if (dataNeedsRewrite) {
+  rebuildLastByOrder();
+  rewriteFile();
+}
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', true);
+if (process.env.TRUST_PROXY === '1') app.set('trust proxy', true);
 app.use(express.json({ limit: '128kb' }));
 
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Gps-Device, X-Source',
-  );
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
+// Токен (Bearer) или HttpOnly-сессия UI обязательны для всех API, включая чтение.
+app.use(['/api', '/orders'], auth.middleware);
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -421,7 +449,8 @@ app.delete('/api/positions', (req, res) => {
   });
 });
 
-app.get(['/', '/index.html'], (_req, res) => {
+app.get(['/', '/index.html'], (req, res) => {
+  if (auth.handleTokenQuery(req, res)) return;
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   res.type('html').send(injectMapsApiKey(html, YANDEX_MAPS_API_KEY));
 });
@@ -444,6 +473,19 @@ app.use((error, _req, res, _next) => {
 app.listen(PORT, HOST, () => {
   console.log(`[receiver] http://localhost:${PORT}`);
   console.log(`[receiver] data file: ${DATA_FILE} (${positions.length} points)`);
+  console.log(
+    `[receiver] auth: ${REQUIRED_TOKEN ? 'Bearer + UI session' : 'off (loopback only)'}`,
+  );
+  if (REQUIRED_TOKEN) {
+    console.log(
+      `[receiver] UI: откройте http://localhost:${PORT}/?token=<RECEIVER_TOKEN> один раз для входа`,
+    );
+  }
+  console.log(
+    `[receiver] debug meta: ${STORE_DEBUG_META ? 'on' : 'off'}; retention: ${
+      RETENTION_DAYS > 0 ? `${RETENTION_DAYS} d` : 'off'
+    }`,
+  );
   if (!YANDEX_MAPS_API_KEY) {
     console.warn('[receiver] YANDEX_MAPS_API_KEY не задан: карта не загрузится. Укажите ключ в .env');
   }

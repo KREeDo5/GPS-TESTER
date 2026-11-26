@@ -33,6 +33,8 @@ SENDER_PORT=3100 RECEIVER_PORT=4100 npm start
 RECEIVER_TOKEN=dev-token npm start
 ```
 
+По умолчанию оба сервиса слушают только `127.0.0.1`. Чтобы принимать координаты с телефона по сети, задайте `RECEIVER_HOST=0.0.0.0` и `RECEIVER_TOKEN`: без токена сервис не запустится. После этого откройте UI один раз как `http://localhost:4000/?token=<RECEIVER_TOKEN>` — сервер поставит HttpOnly-сессию и уберёт токен из адресной строки.
+
 Ключ Яндекс Карт задаётся в `.env` (`YANDEX_MAPS_API_KEY`). Переменные окружения, заданные при запуске, имеют приоритет над `.env`.
 
 ## Управление эмуляторами
@@ -87,11 +89,14 @@ X-Gps-Device: android-medium
 {"data": {"id": "...", "order_id": "900001", "accepted_at": "..."}, "meta": {"success": true}}
 ```
 
-История хранится в `data/positions.jsonl` (файл в `.gitignore`).
+История хранится в `data/positions.jsonl` (файл в `.gitignore`). Записи старше `POSITIONS_RETENTION_DAYS` удаляются при старте.
 
 ### Полезные запросы
 
 ```bash
+# Если RECEIVER_TOKEN задан, добавьте заголовок:
+#   -H "Authorization: Bearer $RECEIVER_TOKEN"
+
 curl http://localhost:4000/api/health
 curl http://localhost:4000/api/orders
 curl "http://localhost:4000/api/positions?order_id=900001&limit=100"
@@ -135,6 +140,17 @@ https://api-maps.yandex.ru/2.1/?apikey=<ключ>&lang=ru_RU
 
 Тёмная схема сделана CSS-фильтром на слое тайлов (`.map [class*='ground-pane']`), а не отдельным тёмным стилем карты. Сторонние картографические библиотеки не используются.
 
+## Безопасность
+
+- Оба сервиса по умолчанию слушают только `127.0.0.1`. Сетевой интерфейс — только вместе с токеном (`RECEIVER_TOKEN` / `SENDER_TOKEN`), иначе процесс завершится с ошибкой.
+- Все `/api/*` (включая чтение, SSE, экспорт и удаление) требуют `Authorization: Bearer <token>` либо HttpOnly-сессию UI. CORS-заголовки не отдаются, поэтому сторонние сайты не могут читать или менять данные.
+- Фрагмент токена (`token_tail`) больше не сохраняется. Старые записи с ним, а также с `ip`/`user_agent`/`raw`, очищаются при старте, если `STORE_DEBUG_META` не включён.
+- IP, User-Agent и тело запроса сохраняются только при `STORE_DEBUG_META=1`.
+- История старше `POSITIONS_RETENTION_DAYS` (по умолчанию 30 дней) удаляется при старте. `0` — хранить бессрочно.
+- Sender отправляет preview только на хосты из `PREVIEW_ALLOWED_HOSTS` (по умолчанию localhost и `10.0.2.2`), чтобы не отдать токен на чужой сервер.
+- Токен приёмника в sender UI хранится только в памяти вкладки, не в `localStorage`.
+- Держите `.env` с правами `600`: `chmod 600 .env`.
+
 ## Структура
 
 ```
@@ -142,6 +158,7 @@ apps/sender/          управление эмуляторами и маршр�
 apps/receiver/        приём и визуализация (порт 4000)
 lib/devices.js        adb / simctl
 lib/geo.js            геометрия
+lib/auth.js           токен-авторизация и сессии UI
 scripts/start-all.js  запуск обоих приложений
 data/                 история позиций (не коммитится)
 ```
