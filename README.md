@@ -12,6 +12,22 @@
 
 Карта — официальный Яндекс Карты JavaScript API 2.1 (тёмное оформление через CSS-фильтр слоя тайлов). Маршрут можно строить по дорогам (OSRM) или по прямой.
 
+## Скриншоты
+
+Sender — устройства, точки маршрута и параметры симуляции:
+
+![Sender](docs/screenshots/sender.png)
+
+Receiver — карта, сводка и история обновлений:
+
+![Receiver](docs/screenshots/receiver.png)
+
+iOS logs — live-просмотр `courier_tracking.log`:
+
+![iOS logs](docs/screenshots/ios-logs.png)
+
+Скриншоты сделаны на локальном стенде с демонстрационными данными. Ключи, токены, UDID, bundle ID, путь к файлу и модель устройства на них не выводятся.
+
 ## Запуск
 
 ```bash
