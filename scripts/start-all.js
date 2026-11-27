@@ -16,6 +16,11 @@ const children = [
     stdio: 'inherit',
     env: process.env,
   }),
+  spawn(process.execPath, [path.join(root, 'apps/ios-logs/server.js')], {
+    cwd: root,
+    stdio: 'inherit',
+    env: process.env,
+  }),
 ];
 
 let shuttingDown = false;
@@ -43,3 +48,4 @@ for (const child of children) {
 console.log('GPS-TESTER started');
 console.log('  receiver: http://localhost:4000');
 console.log('  sender:   http://localhost:3000');
+console.log('  ios-logs: http://localhost:8899');

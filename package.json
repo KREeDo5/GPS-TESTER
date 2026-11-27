@@ -2,7 +2,7 @@
   "name": "gps-tester",
   "version": "0.1.0",
   "private": true,
-  "description": "GPS debugging environment: emulator route simulator + mobile position receiver with live map",
+  "description": "GPS debugging environment: emulator route simulator, mobile position receiver with live map, iOS tracking logs",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -11,7 +11,9 @@
     "start": "node scripts/start-all.js",
     "dev": "node scripts/start-all.js",
     "sender": "node apps/sender/server.js",
-    "receiver": "node apps/receiver/server.js"
+    "receiver": "node apps/receiver/server.js",
+    "ios-logs": "node apps/ios-logs/server.js",
+    "logs": "node apps/ios-logs/server.js"
   },
   "dependencies": {
     "express": "^5.1.0"
